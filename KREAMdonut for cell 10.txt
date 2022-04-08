@@ -1,0 +1,217 @@
+							/*Kylie's ROI-based Endocannabinoid Analysis Macro + donut. Written on a Mac for ImageJ 1.53a. All images were already deconvolved by Autoquant and the channels separated but in the same folder.*/
+dir1 = getDirectory("/Users/kah218/Desktop/untitled folder/");			/* Selects an input directory. */ 
+dir2 = dir1 + "\MaxProject/";  					/* Creates the folders inside the input folder where the output files and processed images will be saved. */ 
+dir3 = dir1 + "\ROIs/";
+dir4 = dir1 + "\Areas/";
+dir5 = dir1 + "\Results/";
+dir6 = dir1 + "\ParticleAnalysis/";
+dir7 = dir1 + "\StackDepth/";
+File.makeDirectory(dir2);						/* Creates a new output directory in the selected input folder. */
+File.makeDirectory(dir3);
+File.makeDirectory(dir4);
+File.makeDirectory(dir5);
+File.makeDirectory(dir6);
+File.makeDirectory(dir7);                                                 
+
+							/*The following is from Mikaela's counting macro.*/
+Dialog.create("Please enter the file suffix");					/* Creates a pop-up window for... */
+Dialog.addString("File suffix: ", ".tif", 5);					/* File type. The 5 is the length of the space to type. When running the macro, this will be prompted only before the first image opens, click "OK". */
+Dialog.show(); 
+
+suffix = Dialog.getString();						/* Gets dialog input string (to be used in the function; tells it to take all files that end with "suffix"). */
+processFolder(dir1);						/* The whole input folder will be processed. */											    
+
+function processFolder(dir1) {						/* Creates a function which enables automated processing. */ 
+    list = getFileList(dir1);						/* Lists the input files inside the folder. */
+    for (i = 0; i < list.length; i++) {					/* Counts the number of files on which it will run the function. */
+        if(File.isDirectory(list[i]))						/* Runs the function in a loop for each i:th file on the list, through list[i]. */
+            processFolder("" + dir1 + list[i]);
+        if(endsWith(list[i], suffix))
+            processFile(dir1, list[i]);
+    }
+}
+ 
+function processFile(dir1, file) {					/* This function runs on all the pictures in a directory. The function starts here ("{"), but ends at the end of the macro ("}"). */
+	run("Bio-Formats Windowless Importer", "open=["+ dir1 + file +"]");  		/* Opens the .tif image. The channels are already split */
+
+run("Set Scale...", "distance=1 known=0.111 unit=µm");				/* Sets the measurement options and scale to be used later. Could set this globally, but it will impact image names.*/ 
+
+/*The following until otherwise indicated is new stuff I had to write*/
+selectImage(1);							/* This selects the first image, makes the max projection, and improves contrast to make landmarks easily visible. */				
+
+imageName = getTitle();
+if(matches(imageName, ".*C2.*"))
+        {run("Close"); 
+        return 0;}							/*This part looks at the Image Name and filters for C1 by just closing C2 and moving on to the next file. */
+
+nSlices();							/*This part pulls the number of slices from the z-stack and saves that information in a folder.*/
+processName = replace(imageName, ".oib_C1.tif","");
+baseName = replace(processName, "10_","");
+selectWindow("Log");					
+saveAs("Text", dir7+baseName+".csv");
+run("Close");
+
+run("Z Project...", "projection=[Max Intensity]");				/*This part does the Max Projection for C1 based on if the cell is unlabeled or labeled and changes the name at save to remove unnecessary parts*/
+//run("Brightness/Contrast...");					
+if(matches(imageName, ".*-u.*"))
+    {setMinAndMax(233,729);}						/* VALIDATED */
+     else {setMinAndMax(304, 1552);}   					/* VALIDATED */
+priorName = getTitle();
+newName = replace(priorName, "10_","");
+newName2 = replace(newName, ".oib","");
+saveAs("tiff", dir2+newName2);
+selectImage(1);							/*This is the original image*/
+run("Close");
+selectImage(1);											
+
+matchC1 = replace(newName2, "_C1.tif","");					/*This part derives the name of the matching C2 image.*/
+matchC1b = replace(matchC1, "MAX_","");
+matchC2 = matchC1b + ".oib_C2.tif";
+matchC2b = "10_" + matchC2;
+
+imageC2 = dir1 + matchC2b;						/*This part opens the C2 image because we already know where it is saved as well as the name thanks to the above section.*/
+open(imageC2);
+run("Set Scale...", "distance=1 known=0.111 unit=µm");				/*This is ESSENTIAL otherwise it loses the scale.*/
+
+selectImage(2);							/*This part processes the C2 image.*/				
+run("Z Project...", "projection=[Max Intensity]");
+//run("Brightness/Contrast...");					
+setMinAndMax(67, 1715);	
+priorName2 = getTitle();
+newName3 = replace(priorName2, "10_","");
+newName4 = replace(newName3, ".oib","");
+saveAs("tiff", dir2+newName4); 
+selectImage(2);
+run("Close");
+
+selectImage(1);
+
+							/* This part is from Marie's (& Falk's) macro, which prompts you to draw around the ROI and both give an area measurement (microns^2) and use the same ROI for future measurements */
+setTool("polygon");								
+waitForUser("Now, please, mark your desired region of interest (ROI), \n then click OK to proceed.");
+
+							/*I wrote this section. It saves the initial ROI in an ROI manager and then make a new ROI that’s larger. It then combines those two to create a 3rd donut ROI consisting of the area between the 2. */
+run("ROI Manager...");
+roiManager("Add");
+roiManager("Add");
+roiManager("Select", 0);
+roiManager("Rename", "Inner");
+    roiManager("Update");
+    run("Measure");
+roiManager("Select", 1);
+roiManager("Rename", "Outer");
+run("Enlarge...", "enlarge=5");	/* This part enlarges the outer ROI by 5 µm.*/
+    roiManager("Update");
+    run("Measure");
+roiManager("Select", newArray(0,1));
+roiManager("XOR");
+roiManager("Add");
+roiManager("Select", 2);
+roiManager("Rename", "Donut");
+    roiManager("Update");
+    run("Measure");
+
+selectImage(2);								
+
+run("Restore Selection");						/* This re-applies the ROI drawn before, making it create a mask with only count cells within the ROI */
+roiManager("Show All");
+
+roiManager("Select", 1);
+setBackgroundColor(0, 0, 0);
+run("Clear Outside");
+roiManager("Select", 0);
+roiManager("Set Fill Color", "black");
+
+							/*This is mostly directly from Mikaela’s macro. */
+filename = getTitle();
+dotindex = indexOf(filename,".");					/* Establishes where is the "dot" in the file name, that is where the extension starts (WARNING: If the file name contains multiple dots, the code won't work). */
+areaName = substring(filename, 0 , dotindex); 				/* Creates a variable "areaName" without the file type out of the string of variable "filename". */
+rename(areaName);	
+areaName2 = replace(areaName, "C2","C1");		
+results_area = dir4 + areaName2 + ".csv";					/* Exports area of the ROI as a .csv file, and closes the Results window */
+saveAs("Results", results_area);
+selectWindow("Results");
+run("Close");
+
+							/*This is stuff I had to write. */
+selectImage(2);							/* This part saves the "masked" image with only the desired donut ROI visible. */
+roiName = matchC1b + "-C2-ROI";	
+run("Flatten");		
+selectImage(3);							/* Creates and saves a new "flattened" image of C2 as well as the original C2 with ROIs. */
+saveAs("tiff", dir3+"flattened-"+roiName);
+selectImage(2);
+saveAs("tiff",dir3+roiName);
+
+selectImage(2);							/* Run this on the non-flattened image otherwise the data isn’t useful. */
+roiManager("Select", 2);
+run("Set Measurements...", "area mean min integrated area_fraction display redirect=None decimal=3");
+roiManager("Measure");						/*For the donut, this will give the area, the mean gray value or average gray value in the ROI, the min & max gray level, the integrated density or the sum of the values of the pixels in the image or selection which is the equivalent to the product of the area and mean gray value, and area fraction. Note that the percent area will be zero; this is just to be ready for the particle analysis.*/
+saveAs("Results", dir5+matchC1b+".csv");
+selectWindow("Results");
+run("Close");
+selectImage(3);							/* Need the flattened image for the Particle Analysis. */
+
+							/*Color Thresholder 1.53a. Autogenerated macro, single images only!*/
+min=newArray(3);
+max=newArray(3);
+filter=newArray(3);
+a=getTitle();
+run("HSB Stack");
+run("Convert Stack to Images");
+selectWindow("Hue");
+rename("0");
+selectWindow("Saturation");
+rename("1");
+selectWindow("Brightness");
+rename("2");
+min[0]=0;
+max[0]=255;
+filter[0]="pass";
+min[1]=0;
+max[1]=255;
+filter[1]="pass";
+min[2]=100;
+max[2]=255;
+filter[2]="pass";
+for (i=0;i<3;i++){
+  selectWindow(""+i);
+  setThreshold(min[i], max[i]);
+  run("Convert to Mask");
+  if (filter[i]=="stop")  run("Invert");
+}
+imageCalculator("AND create", "0","1");
+imageCalculator("AND create", "Result of 0","2");
+for (i=0;i<3;i++){
+  selectWindow(""+i);
+  close();
+}
+selectWindow("Result of 0");
+close();
+selectWindow("Result of Result of 0");
+rename(a); 
+							/* End of Colour Thresholding*/
+
+roiManager("Select", 2);						/*This section saves everything generated by the Particle Analysis and closes everything that's open.*/
+run("Analyze Particles...", "size=0-infinity show=[Overlay Masks] display summarize");
+selectWindow("Results");
+saveAs("Results", dir6+"Results-"+matchC1b+".csv");
+run("Close");
+selectWindow("Summary");
+saveAs("Results",dir6+"Summary-"+matchC1b+".csv");
+run("Close");
+selectImage(3);
+saveAs("tiff", dir6+matchC1b+".csv");
+run("Close");
+selectImage(2);
+run("Close");
+selectImage(1);
+run("Close");
+/*roiManager("Select", newArray(0,1,2));*/
+/*roiManager("Delete");*/
+selectWindow("ROI Manager");
+run("Close");
+}
+
+
+
+
